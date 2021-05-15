@@ -26,11 +26,20 @@ namespace jabSearch
 
         internal void Log(string message)
         {
+           
             var datedMessage = $"{DateTime.Now.ToString("hh-mm-ss tt")}: {message}";
             Console.WriteLine(datedMessage);
             outputFile.WriteLine(datedMessage);
         }
 
+        public static void ClearCurrentConsoleLine()
+        {
+            Console.SetCursorPosition(0, Console.CursorTop - 1);
+            int currentLineCursor = Console.CursorTop;
+            Console.SetCursorPosition(0, Console.CursorTop);
+            Console.Write(new string(' ', Console.WindowWidth));
+            Console.SetCursorPosition(0, currentLineCursor);
+        }
         internal void LogError(string message)
         {
             Console.ForegroundColor = ConsoleColor.Red;

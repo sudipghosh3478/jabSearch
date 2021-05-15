@@ -1,6 +1,7 @@
 ﻿using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
+using System.Configuration;
 using System.IdentityModel.Tokens.Jwt;
 using System.IO;
 using System.Linq;
@@ -16,13 +17,16 @@ namespace jabSearch
 
 
 
-        readonly string baseUrl = System.Configuration.ConfigurationManager.AppSettings["baseUrl"];
+        readonly string baseUrl = ConfigurationManager.AppSettings["baseUrl"];
         readonly string getSessionsForPuneUrlBase;          // "https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/findByDistrict?district_id=363&date=";
         readonly string getSessionsByPinUrl;                   //https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/findByPin?pincode=422027&date=10-05-2021
         readonly string scheduleAPIUrl;                                //"https://cdn-api.co-vin.in/api/v2/appointment/schedule";
-        readonly string beneficiaries = System.Configuration.ConfigurationManager.AppSettings["beneficiaries"];                                  // "'29425896407850','49452312943680','18714828173000'";
-        readonly string date = System.Configuration.ConfigurationManager.AppSettings["date"];
-        readonly string day;
+        readonly string beneficiaries = ConfigurationManager.AppSettings["beneficiaries"];                                  // "'29425896407850','49452312943680','18714828173000'";
+        readonly string dates = ConfigurationManager.AppSettings["date"];
+        int personCount = 1;
+        string[] datesArr;
+        //readonly string day;
+        readonly int min_age_limit = 18;
         string[] beneficiariesArr;
 
         string token;
@@ -46,34 +50,49 @@ namespace jabSearch
 
         public JabHelper()
         {
-            getSessionsForPuneUrlBase = baseUrl + System.Configuration.ConfigurationManager.AppSettings["getSessionsForPuneUrlBase"];
-            getSessionsByPinUrl = baseUrl + System.Configuration.ConfigurationManager.AppSettings["getSessionsByPinUrl"];
-            scheduleAPIUrl = baseUrl + System.Configuration.ConfigurationManager.AppSettings["scheduleAPIUrl"];
+            getSessionsForPuneUrlBase = baseUrl + ConfigurationManager.AppSettings["getSessionsForPuneUrlBase"];
+            getSessionsByPinUrl = baseUrl + ConfigurationManager.AppSettings["getSessionsByPinUrl"];
+            scheduleAPIUrl = baseUrl + ConfigurationManager.AppSettings["scheduleAPIUrl"];
 
             beneficiariesArr = beneficiaries.Split(',');
+            datesArr = dates.Split(',');
+
+            if (ConfigurationManager.AppSettings["min_age_limit"] != null)
+            {
+                min_age_limit = Convert.ToInt32(ConfigurationManager.AppSettings["min_age_limit"]);
+            }
+
+            if (ConfigurationManager.AppSettings["personCount"] != null)
+            {
+                personCount = Convert.ToInt32(ConfigurationManager.AppSettings["personCount"]);
+            }
+
 
             MessageHelper = new MessageHelper();
             Logger = new Logger();
-            day = DateTime.Parse(date).Day.ToString();
+            // day = DateTime.Parse(date).Day.ToString();
         }
 
 
 
-        void RunAvailabilityLoop(Action action)
+        void RunAvailabilityLoop(Action<string> action)
         {
             try
             {
 
-                Logger.Log("Running availability check for date  " + date);
+                Logger.Log("Running availability check for date  " + dates);
                 Logger.Log(action.Method.Name);
                 Logger.EmptyLine();
-                MessageHelper.SendMessage("Running availability check for date  " + date);
+                MessageHelper.SendMessage("Running availability check for date  " + dates);
                 while (true)
                 {
                     // CheckToken();
 
-
-                    action.Invoke();
+                    foreach (var date in datesArr)
+                    {
+                        action.Invoke(date);
+                    }
+                   
                     int interval = getInterval();
                     System.Threading.Thread.Sleep(interval);
                 };
@@ -98,18 +117,19 @@ namespace jabSearch
 
 
 
-        public void RunAvailabilityCheckByPin()
+
+        public void RunAvailabilityCheckByPin(string date)
         {
             var pins = getPins().Split(',');
             List<Task> tasks = new List<Task>();
             foreach (var pin in pins)
             {
-                tasks.Add(CheckByPin(pin));
+                tasks.Add(CheckByPin(pin, date));
             }
             Task.WaitAll(tasks.ToArray());
         }
 
-        public Task CheckByPin(string pin)
+        public Task CheckByPin(string pin, string date)
         {
             return Task.Run(() =>
             {
@@ -117,12 +137,14 @@ namespace jabSearch
                 string getByPinUrl = $"{getSessionsByPinUrl}?pincode={pin}&date={date}";
 
                 HttpResponseMessage pinSlotResponse = ApiClient.GetAsync(getByPinUrl).Result;
-                ProcessSessionResponse(pinSlotResponse, pin);
+                ProcessSessionResponse(pinSlotResponse, date, pin);
             });
 
         }
 
-        public void RunAvailabilityCheckByDistrict()
+       
+
+        public void RunAvailabilityCheckByDistrict(string date)
         {
             try
             {
@@ -168,7 +190,7 @@ namespace jabSearch
                     }
                  * */
                 if (districtSlotResponse.StatusCode == System.Net.HttpStatusCode.OK)
-                    ProcessSessionResponse(districtSlotResponse);
+                    ProcessSessionResponse(districtSlotResponse, date);
                 else
                 {
                     Logger.LogError(districtSlotResponse.StatusCode + " " + districtSlotResponse.ReasonPhrase);
@@ -181,8 +203,9 @@ namespace jabSearch
             }
         }
 
-        private void ProcessSessionResponse(HttpResponseMessage districtSlotResponse, string pin = "")
+        private void ProcessSessionResponse(HttpResponseMessage districtSlotResponse, string date, string pin = "")
         {
+            string day =DateTime.Parse(date).Day.ToString();
             dynamic response = JObject.Parse(districtSlotResponse.Content.ReadAsStringAsync().Result);
             if (response.sessions != null)
             {
@@ -192,14 +215,14 @@ namespace jabSearch
                     //var ssession = sessions.FirstOrDefault();
                     //SendSessionMessage(ssession);
 
-                    var below45 = ((IEnumerable<dynamic>)response.sessions).Where(s => s.min_age_limit == 45);
+                    var below45 = ((IEnumerable<dynamic>)response.sessions).Where(s => s.min_age_limit == min_age_limit);
                     if (below45.Count() > 0)
                     {
                         foreach (dynamic session in below45)
                         {
                             SendSessionMessage(session);
 
-                            if (Convert.ToInt32(session.available_capacity.ToString()) >= beneficiariesArr.Length)
+                            if (Convert.ToInt32(session.available_capacity.ToString()) >= personCount)
                             {
                                 Console.Beep();
                                 Console.Beep();
@@ -210,7 +233,9 @@ namespace jabSearch
                     }
                     else
                     {
-                        Logger.Log("No Sessions available for above 45 on " + day + " " + pin);
+                        
+                        Logger.Log($"No Sessions available for age {min_age_limit} on { day } " + pin);
+                        
                         //foreach (dynamic session in response.sessions)
                         //{
                         //    SendSessionMessage(session);
@@ -220,6 +245,7 @@ namespace jabSearch
                 }
                 else
                 {
+                    
                     Logger.Log("No Sessions available on date " + day + " " + pin);
                 }
             }
@@ -351,8 +377,9 @@ namespace jabSearch
 
         string getPins()
         {
-            using (StreamReader reader = new StreamReader("pins.txt"))
-                return reader.ReadLine().Trim();
+            //using (StreamReader reader = new StreamReader("pins.txt"))
+            //    return reader.ReadLine().Trim();
+            return ConfigurationManager.AppSettings["pins"];
         }
 
         int getInterval()
@@ -369,7 +396,7 @@ namespace jabSearch
 
             try
             {
-                return Convert.ToInt32(System.Configuration.ConfigurationManager.AppSettings["interval"]);
+                return Convert.ToInt32(ConfigurationManager.AppSettings["interval"]);
             }
             catch
             {

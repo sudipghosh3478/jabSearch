@@ -1,6 +1,7 @@
 ﻿using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
+using System.Configuration;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
@@ -10,7 +11,7 @@ namespace jabSearch
 {
     class Program
     {
-      
+
 
         static void Main(string[] args)
         {
@@ -22,28 +23,30 @@ namespace jabSearch
 
 
 
+                    var pinSearch = ConfigurationManager.AppSettings["usePinSearch"];
+                    if (pinSearch != "" && pinSearch.Trim().ToLowerInvariant() == "true")
+                        helper.RunAvailabilityCheckByPinLoop();
+                    else
+                        helper.RunAvailabilityCheckByDistrictLoop();
 
 
-                    helper.RunAvailabilityCheckByDistrictLoop();
-
-                    //helper.RunAvailabilityCheckByPinLoop();
 
 
 
 
 
-                  
+
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine(ex.StackTrace);
-               
+
             }
             Console.ReadKey();
         }
 
-        
+
 
     }
 }
